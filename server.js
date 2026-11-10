@@ -1,7 +1,8 @@
 'use strict';
-// TempWatch — local laptop monitor. Zero dependencies: Node for CPU/RAM and the
-// web dashboard, a small PowerShell helper for thermal zones, battery, disks,
-// network and per-app usage, and Windows toast notifications for alerts.
+// TempWatch — local laptop monitor for Windows and macOS. Zero dependencies: Node for
+// CPU/RAM and the web dashboard, a platform helper (sensor.ps1 on Windows,
+// sensor-mac.js on macOS) for temperature, battery, disks, network and per-app
+// usage, and native desktop notifications for alerts.
 const http = require('http');
 const os = require('os');
 const fs = require('fs');
@@ -16,6 +17,8 @@ const DATA = path.join(ROOT, 'data');
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
 const ALERTS_FILE = path.join(DATA, 'alerts.json');
 const OPEN = process.argv.includes('--open');
+const IS_WIN = process.platform === 'win32';
+const IS_MAC = process.platform === 'darwin';
 
 // ---------------------------------------------------------------- settings
 const CARD_IDS = ['temp', 'cpu', 'ram', 'tempChart', 'usageChart', 'cores', 'zones', 'system', 'procs', 'alerts'];
@@ -127,8 +130,24 @@ let extAt = 0;
 let shuttingDown = false;
 const arr = (x) => (Array.isArray(x) ? x : x ? [x] : []);
 
+let macTimer = null;
+let macBusy = false;
+function startMacSensor() {
+  const mac = require('./sensor-mac');
+  const pass = async () => {
+    if (macBusy) return;
+    macBusy = true;
+    try { ext = await mac.collect(); extAt = Date.now(); } catch { /* keep the last reading */ }
+    macBusy = false;
+  };
+  pass();
+  macTimer = setInterval(pass, settings.intervalMs);
+}
+
 function startSensor() {
   stopSensor();
+  if (IS_MAC) return startMacSensor();
+  if (!IS_WIN) return;   // other systems still get CPU and memory from Node
   const child = spawn('powershell.exe', [
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
     '-File', path.join(ROOT, 'sensor.ps1'), '-IntervalMs', String(settings.intervalMs),
@@ -154,6 +173,8 @@ function startSensor() {
   });
 }
 function stopSensor() {
+  clearInterval(macTimer);
+  macTimer = null;
   if (!sensor) return;
   const c = sensor;
   sensor = null;
@@ -187,11 +208,11 @@ function tick() {
   });
   prevTimes = cur;
   const cpu = r1(cores.reduce((s, v) => s + v, 0) / (cores.length || 1));
-  const memTotal = os.totalmem();
-  const memUsed = memTotal - os.freemem();
-  const ram = r1((memUsed / memTotal) * 100);
-
   const fresh = ext && now - extAt < Math.max(8000, settings.intervalMs * 4);
+  const memTotal = os.totalmem();
+  // macOS counts cached files as "not free", so use the helper's figure there.
+  const memUsed = fresh && ext.memUsed ? Math.min(memTotal, ext.memUsed) : memTotal - os.freemem();
+  const ram = r1((memUsed / memTotal) * 100);
   const zones = fresh
     ? arr(ext.zones).filter((z) => z && typeof z.c === 'number' && z.c > 0 && z.c < 150).map((z) => ({ name: String(z.name), c: z.c }))
     : [];
@@ -215,7 +236,10 @@ function tick() {
     disks: fresh ? arr(ext.disks) : [],
     procs: fresh ? arr(ext.procs) : [],
     uptime: os.uptime(),
-    sensorOk: !!fresh,
+    sensorOk: !!fresh || (!IS_WIN && !IS_MAC),
+    tempHint: IS_MAC && fresh && !ext.tempTool
+      ? 'macOS needs a helper to read temperature. Install one with "brew install narugit/tap/smctemp" (or "brew install osx-cpu-temp" on Intel Macs), then restart TempWatch.'
+      : !IS_WIN && !IS_MAC ? 'Temperature readings are only available on Windows and macOS.' : null,
   };
   evaluateAlerts(sample);
   sample.active = Object.keys(RULES).filter((id) => ruleState[id].active);
@@ -324,6 +348,17 @@ function evaluateAlerts(s) {
 
 function toast(title, body) {
   try {
+    if (IS_MAC) {
+      // Text is passed as arguments, never spliced into the script.
+      const mac = spawn('osascript', [
+        '-e', 'on run argv',
+        '-e', 'display notification (item 2 of argv) with title (item 1 of argv) sound name "Glass"',
+        '-e', 'end run', `TempWatch: ${title}`, body,
+      ], { stdio: 'ignore' });
+      mac.on('error', () => {});
+      return;
+    }
+    if (!IS_WIN) return;
     const child = spawn('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'toast.ps1'),
     ], {
@@ -433,6 +468,11 @@ const server = http.createServer(async (req, res) => {
 });
 
 function openBrowser() {
+  if (!IS_WIN) {
+    const opener = spawn(IS_MAC ? 'open' : 'xdg-open', [URL_BASE], { stdio: 'ignore', detached: true });
+    opener.on('error', () => {});
+    return opener.unref();
+  }
   spawn('cmd', ['/c', 'start', '', URL_BASE], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
 }
 function shutdown() {

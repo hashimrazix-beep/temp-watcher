@@ -115,7 +115,7 @@ dl.stats dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
 .legend { display: flex; gap: 6px; }
 .legend button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: none; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 500; color: var(--ink2); }
 .legend button[aria-pressed="false"] { opacity: .45; text-decoration: line-through; }
-.empty { color: var(--muted); padding: 18px 0; text-align: center; }
+.empty { color: var(--muted); padding: 18px 0; text-align: center; overflow-wrap: anywhere; }
 
 .rows { display: grid; gap: 9px; }
 .row { display: grid; grid-template-columns: 78px 1fr 52px; align-items: center; gap: 10px; font-size: 13px; }
@@ -227,7 +227,7 @@ kbd { border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font:
     <div id="rules"></div>
 
     <h3>Notifications</h3>
-    <div class="set"><label for="n-toast">Windows notifications<small>Pop-up alerts, even when this page is closed</small></label><input class="sw-t" type="checkbox" id="n-toast" data-path="notify.toast"></div>
+    <div class="set"><label for="n-toast">Desktop notifications<small>Pop-up alerts, even when this page is closed</small></label><input class="sw-t" type="checkbox" id="n-toast" data-path="notify.toast"></div>
     <div class="set"><label for="n-sound">Sound in this page</label><input class="sw-t" type="checkbox" id="n-sound" data-path="notify.sound"></div>
     <div class="set"><label for="n-rec">Tell me when it's back to normal</label><input class="sw-t" type="checkbox" id="n-rec" data-path="notify.recovery"></div>
     <div class="set"><label for="n-cool">Repeat while still over the limit<small>Minutes between reminders</small></label><input type="number" id="n-cool" min="1" max="120" data-path="notify.cooldownMin" style="width:72px"></div>
@@ -237,7 +237,7 @@ kbd { border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font:
 
     <h3>Display</h3>
     <div class="set"><label for="d-unit">Temperature unit</label><select id="d-unit" data-path="unit"><option value="C">Celsius (°C)</option><option value="F">Fahrenheit (°F)</option></select></div>
-    <div class="set"><label for="d-theme">Theme</label><select id="d-theme" data-path="theme"><option value="system">Match Windows</option><option value="dark">Dark</option><option value="light">Light</option></select></div>
+    <div class="set"><label for="d-theme">Theme</label><select id="d-theme" data-path="theme"><option value="system">Match system</option><option value="dark">Dark</option><option value="light">Light</option></select></div>
     <div class="set"><span class="l">Accent color</span><div class="swatches" id="swatches"></div></div>
     <div class="set"><label for="d-density">Layout density</label><select id="d-density" data-path="density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></div>
     <div class="set"><label for="d-limits">Show alert limits on the temperature chart</label><input class="sw-t" type="checkbox" id="d-limits" data-path="chart.showLimits"></div>
@@ -619,7 +619,7 @@ function syncZoneUI() {
     zoneKey = key;
     box.textContent = '';
     for (const raw of zoneOrder) {
-      const inp = h('input', { type: 'text', 'aria-label': `Name for ${raw}`, maxlength: '40', title: `Windows name: ${raw}` });
+      const inp = h('input', { type: 'text', 'aria-label': `Name for ${raw}`, maxlength: '40', title: `System name: ${raw}` });
       inp.addEventListener('change', () => {
         const names = { ...S.zoneNames };
         if (inp.value.trim()) names[raw] = inp.value.trim(); else delete names[raw];
@@ -642,6 +642,7 @@ function syncZoneUI() {
 function renderZones() {
   const zs = last ? last.zones : [];
   $('#zoneEmpty').hidden = zs.length > 0 || zoneOrder.length > 0;
+  $('#zoneEmpty').textContent = (last && last.tempHint) || 'No temperature sensor is reporting right now.';
   for (const row of $('#zoneRows').children) {
     const z = zs.find((x) => x.name === row.dataset.z);
     row.children[1].firstChild.style.width = z ? Math.max(0, Math.min(100, (z.c - TMIN) / (TMAX - TMIN) * 100)) + '%' : '0%';
