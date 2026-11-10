@@ -1,0 +1,8 @@
+# Local settings and alert history (machine-specific, created at runtime)
+data/
+# Editor / tool folders
+.claude/
+node_modules/
+*.log
+.env
+.env.*
