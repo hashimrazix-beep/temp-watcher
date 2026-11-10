@@ -1,0 +1,10 @@
+{
+  "name": "temp-watcher",
+  "version": "1.0.0",
+  "description": "Local laptop monitor: temperature, CPU and RAM dashboard with desktop alerts",
+  "private": true,
+  "bin": { "temp-watcher": "server.js" },
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=16" },
+  "files": ["server.js", "sensor-unix.js", "sensor.ps1", "toast.ps1", "public"]
+}

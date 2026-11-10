@@ -116,6 +116,7 @@ dl.stats dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
 .legend button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: none; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 500; color: var(--ink2); }
 .legend button[aria-pressed="false"] { opacity: .45; text-decoration: line-through; }
 .empty { color: var(--muted); padding: 18px 0; text-align: center; overflow-wrap: anywhere; }
+#zoneEmpty { padding: 10px 0 0; text-align: left; font-size: 12.5px; }
 
 .rows { display: grid; gap: 9px; }
 .row { display: grid; grid-template-columns: 78px 1fr 52px; align-items: center; gap: 10px; font-size: 13px; }
@@ -641,8 +642,9 @@ function syncZoneUI() {
 }
 function renderZones() {
   const zs = last ? last.zones : [];
-  $('#zoneEmpty').hidden = zs.length > 0 || zoneOrder.length > 0;
-  $('#zoneEmpty').textContent = (last && last.tempHint) || 'No temperature sensor is reporting right now.';
+  const hint = last && last.tempHint;
+  $('#zoneEmpty').hidden = !hint && (zs.length > 0 || zoneOrder.length > 0);
+  $('#zoneEmpty').textContent = hint || 'No temperature sensor is reporting right now.';
   for (const row of $('#zoneRows').children) {
     const z = zs.find((x) => x.name === row.dataset.z);
     row.children[1].firstChild.style.width = z ? Math.max(0, Math.min(100, (z.c - TMIN) / (TMAX - TMIN) * 100)) + '%' : '0%';

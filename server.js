@@ -1,7 +1,8 @@
+#!/usr/bin/env node
 'use strict';
-// TempWatch — local laptop monitor for Windows and macOS. Zero dependencies: Node for
+// TempWatch — local laptop monitor for Windows, macOS and Linux. Zero dependencies: Node for
 // CPU/RAM and the web dashboard, a platform helper (sensor.ps1 on Windows,
-// sensor-mac.js on macOS) for temperature, battery, disks, network and per-app
+// sensor-unix.js on macOS and Linux) for temperature, battery, disks, network and per-app
 // usage, and native desktop notifications for alerts.
 const http = require('http');
 const os = require('os');
@@ -13,12 +14,17 @@ const PORT = Number(process.env.PORT) || 4517;
 const HOST = '127.0.0.1';
 const URL_BASE = `http://${HOST}:${PORT}`;
 const ROOT = __dirname;
-const DATA = path.join(ROOT, 'data');
+// Cloned copies keep their data next to the code; a copy run through npx lives in a
+// throwaway cache, so its settings go in the home folder instead.
+const DATA = process.env.TEMPWATCH_DATA
+  || (ROOT.split(path.sep).includes('node_modules') ? path.join(os.homedir(), '.tempwatch') : path.join(ROOT, 'data'));
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
 const ALERTS_FILE = path.join(DATA, 'alerts.json');
-const OPEN = process.argv.includes('--open');
+const OPEN = !process.argv.includes('--no-open');
 const IS_WIN = process.platform === 'win32';
 const IS_MAC = process.platform === 'darwin';
+const IS_LINUX = process.platform === 'linux';
+const IS_UNIX = IS_MAC || IS_LINUX;
 
 // ---------------------------------------------------------------- settings
 const CARD_IDS = ['temp', 'cpu', 'ram', 'tempChart', 'usageChart', 'cores', 'zones', 'system', 'procs', 'alerts'];
@@ -130,23 +136,23 @@ let extAt = 0;
 let shuttingDown = false;
 const arr = (x) => (Array.isArray(x) ? x : x ? [x] : []);
 
-let macTimer = null;
-let macBusy = false;
-function startMacSensor() {
-  const mac = require('./sensor-mac');
+let unixTimer = null;
+let unixBusy = false;
+function startUnixSensor() {
+  const unix = require('./sensor-unix');
   const pass = async () => {
-    if (macBusy) return;
-    macBusy = true;
-    try { ext = await mac.collect(); extAt = Date.now(); } catch { /* keep the last reading */ }
-    macBusy = false;
+    if (unixBusy) return;
+    unixBusy = true;
+    try { ext = await unix.collect(); extAt = Date.now(); } catch { /* keep the last reading */ }
+    unixBusy = false;
   };
   pass();
-  macTimer = setInterval(pass, settings.intervalMs);
+  unixTimer = setInterval(pass, settings.intervalMs);
 }
 
 function startSensor() {
   stopSensor();
-  if (IS_MAC) return startMacSensor();
+  if (IS_UNIX) return startUnixSensor();
   if (!IS_WIN) return;   // other systems still get CPU and memory from Node
   const child = spawn('powershell.exe', [
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
@@ -173,8 +179,8 @@ function startSensor() {
   });
 }
 function stopSensor() {
-  clearInterval(macTimer);
-  macTimer = null;
+  clearInterval(unixTimer);
+  unixTimer = null;
   if (!sensor) return;
   const c = sensor;
   sensor = null;
@@ -196,6 +202,18 @@ function pickTemp(zones) {
   const one = zones.find((z) => z.name === src);
   if (one) return one.c;
   return Math.max(...zones.map((z) => z.c));
+}
+
+// Shown under the sensor list when a reading is missing or limited.
+function tempHint(fresh, zones) {
+  if (!IS_WIN && !IS_UNIX) return 'Temperature readings are not available on this system.';
+  if (!fresh) return null;
+  if (IS_MAC && !ext.cpuTempTool) {
+    return (zones.length ? 'Showing battery temperature only. ' : 'No temperature sensor found. ')
+      + 'For CPU temperature, run "brew install narugit/tap/smctemp" (or "brew install osx-cpu-temp" on Intel Macs) and restart TempWatch.';
+  }
+  if (IS_LINUX && !zones.length) return 'This system does not expose a temperature sensor (common in virtual machines).';
+  return null;
 }
 
 function tick() {
@@ -236,10 +254,8 @@ function tick() {
     disks: fresh ? arr(ext.disks) : [],
     procs: fresh ? arr(ext.procs) : [],
     uptime: os.uptime(),
-    sensorOk: !!fresh || (!IS_WIN && !IS_MAC),
-    tempHint: IS_MAC && fresh && !ext.tempTool
-      ? 'macOS needs a helper to read temperature. Install one with "brew install narugit/tap/smctemp" (or "brew install osx-cpu-temp" on Intel Macs), then restart TempWatch.'
-      : !IS_WIN && !IS_MAC ? 'Temperature readings are only available on Windows and macOS.' : null,
+    sensorOk: !!fresh || (!IS_WIN && !IS_UNIX),
+    tempHint: tempHint(fresh, zones),
   };
   evaluateAlerts(sample);
   sample.active = Object.keys(RULES).filter((id) => ruleState[id].active);
@@ -356,6 +372,11 @@ function toast(title, body) {
         '-e', 'end run', `TempWatch: ${title}`, body,
       ], { stdio: 'ignore' });
       mac.on('error', () => {});
+      return;
+    }
+    if (IS_LINUX) {
+      const nix = spawn('notify-send', ['-a', 'TempWatch', '--', `TempWatch: ${title}`, body], { stdio: 'ignore' });
+      nix.on('error', () => {});   // not installed: the dashboard still shows the alert
       return;
     }
     if (!IS_WIN) return;
